@@ -7,10 +7,12 @@ use App\Modules\Shared\Database\RawConnection as DB;
 class CajeroSessionService
 {
     private CajeroQueryService $query;
+    private CajeroBalanceService $balance;
 
-    public function __construct(CajeroQueryService $query)
+    public function __construct(CajeroQueryService $query, CajeroBalanceService $balance)
     {
         $this->query = $query;
+        $this->balance = $balance;
     }
 
     public function apertura(int $codUsuario, int $idAgencia, int $idCaja, array $montos, string $ip): array
@@ -42,27 +44,40 @@ class CajeroSessionService
             return ['success' => false, 'message' => "El monto de apertura ($saldoApertura) es menor al mínimo permitido ({$caja['minimo']})"];
         }
 
-        $boveda = DB::selectOne(
-            "SELECT * FROM boveda WHERE id_agencia = :ag AND id_moneda = :mon",
-            [':ag' => $caja['id_agencia'], ':mon' => $caja['id_moneda']]
-        );
-
-        if ($boveda && $saldoApertura > 0) {
-            $saldoBoveda = (float) DB::scalar(
-                "SELECT COALESCE(SUM(saldo), 0)
-                 FROM saldo_boveda
-                 WHERE id_boveda = :id AND DATE(fec_crea_saldo) <= :f",
-                [':id' => $boveda['id_boveda'], ':f' => $fecha]
-            );
-            $disponibleBoveda = $saldoBoveda - (float) $boveda['minimo'];
-            if ($saldoApertura > $disponibleBoveda) {
-                return ['success' => false, 'message' => "Fondos insuficientes en bóveda (disponible: $disponibleBoveda)"];
-            }
-        }
-
         $uuid = $this->uuid();
 
-        return DB::transaction(function () use ($idCaja, $caja, $boveda, $saldoApertura, $montos, $fecha, $idAgencia, $codUsuario, $ip, $uuid) {
+        return DB::transaction(function () use ($idCaja, $caja, $saldoApertura, $montos, $fecha, $idAgencia, $codUsuario, $ip, $uuid) {
+            // Bloqueamos la bóveda durante la lectura y el descuento para que
+            // dos cajeros no puedan consumir el mismo saldo disponible.
+            $boveda = DB::selectOne(
+                "SELECT * FROM boveda WHERE id_agencia = :ag AND id_moneda = :mon FOR UPDATE",
+                [':ag' => $caja['id_agencia'], ':mon' => $caja['id_moneda']]
+            );
+
+            if ($saldoApertura > 0 && !$boveda) {
+                return [
+                    'success' => false,
+                    'message' => 'No existe una bóveda activa para la moneda de esta caja',
+                ];
+            }
+
+            if ($boveda && $saldoApertura > 0) {
+                $saldoBoveda = $this->balance->saldoBoveda((int) $boveda['id_boveda'], $fecha);
+                $disponibleBoveda = max(0, $saldoBoveda - (float) $boveda['minimo']);
+                if ($saldoApertura > $disponibleBoveda + 0.0001) {
+                    return [
+                        'success' => false,
+                        'message' => sprintf(
+                            'Fondos insuficientes en bóveda. Disponible: %.2f %s; solicitado: %.2f %s',
+                            $disponibleBoveda,
+                            $caja['moneda'] ?? '',
+                            $saldoApertura,
+                            $caja['moneda'] ?? ''
+                        ),
+                    ];
+                }
+            }
+
             DB::execute(
                 "INSERT INTO saldo_caja (id_caja, saldo, fec_crea_saldo, conciliacion)
                  VALUES (:id, :saldo, NOW(), 'A')",
