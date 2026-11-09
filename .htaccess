@@ -1,4 +1,13 @@
 RewriteEngine On
-RewriteBase /cgrapi/
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^ public/index.php [L]
+
+# No permitir acceso web al código, configuración o archivos privados de Laravel.
+RewriteRule (^|/)\.(?!well-known(?:/|$)) - [F,L]
+RewriteRule ^(app|bootstrap|config|database|resources|routes|src|storage|tests|vendor)(/|$) - [F,L,NC]
+RewriteRule ^(artisan|composer\.(json|lock)|server\.php|phpunit\.xml)$ - [F,L,NC]
+RewriteRule ^public/(index\.legacy\.php|router\.php)$ - [F,L,NC]
+
+# La aplicación sirve las peticiones desde public/ aunque el alojamiento use public_html.
+RewriteRule ^$ public/index.php [L]
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteCond %{REQUEST_URI} !^/\.well-known/
+RewriteRule ^(.*)$ public/$1 [L]
