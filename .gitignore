@@ -1,0 +1,53 @@
+.env
+/\.env.*
+!/.env.example
+/vendor/
+/node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Laravel
+/storage/app/
+/storage/*.key
+/bootstrap/cache/*.php
+
+# Legacy module configs (contain DB credentials)
+src/legacy/auditoria/config.php
+src/legacy/contabilidad/config.php
+src/legacy/riesgo_cambiario/config.php
+app/Legacy/auditoria/config.php
+app/Legacy/contabilidad/config.php
+app/Legacy/riesgo_cambiario/config.php
+app/Legacy_old/auditoria/config.php
+app/Legacy_old/contabilidad/config.php
+app/Legacy_old/riesgo_cambiario/config.php
+
+# Legacy generated files
+src/legacy/riesgo_cambiario/cache/
+src/legacy/auditoria/salida/
+app/Legacy/riesgo_cambiario/cache/
+app/Legacy/auditoria/salida/
+app/Legacy_old/riesgo_cambiario/cache/
+app/Legacy_old/auditoria/salida/
+
+# mpdf cache (regenerated automatically)
+src/mpdf/ttfontdata/*.php
+src/mpdf/tmp/*
+src/mpdf/graph_cache/*
+app/Legacy/mpdf/ttfontdata/*.php
+app/Legacy/mpdf/tmp/*
+app/Legacy/mpdf/graph_cache/*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local tooling, scratch files and extracted bank statements
+/.claude/
+/.tmp*
+/tmp/
+/src/legacy/*/cache/
+/app/Legacy/*/cache/

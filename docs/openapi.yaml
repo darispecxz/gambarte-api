@@ -1,0 +1,355 @@
+openapi: 3.0.3
+info:
+  title: CGR Reports API
+  version: 1.0.0
+  description: >
+    API REST que expone los reportes del sistema PHP `bo_cgr_hostinger/reportes`
+    a la aplicación Angular. **No reimplementa lógica de negocio**: reutiliza las
+    clases PHP existentes (Panel, Dashboard, Auditoria\Reportes/Zip, api_dashboard.php),
+    que siguen siendo la única fuente de verdad. Bajo los mismos parámetros, la API
+    devuelve los mismos resultados que el sistema actual.
+
+    Áreas: **Riesgos** (6 informes + tablero, PDF), **Logs/Bitácoras** (7 reportes,
+    Excel + ZIP mensual) y **Operaciones** (vistas operativas/comerciales).
+servers:
+  - url: http://localhost:8899
+    description: Desarrollo (php -S)
+
+tags:
+  - name: Riesgos
+  - name: Logs
+  - name: Operaciones
+  - name: Discrepancias
+    description: Auditoría e incidencias contables
+  - name: Sistema
+
+paths:
+  /api/health:
+    get:
+      tags: [Sistema]
+      summary: Estado del servicio
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /api/risks:
+    get:
+      tags: [Riesgos]
+      summary: Catálogo de informes de riesgo
+      responses:
+        '200':
+          description: Lista de informes (slug, título, icono)
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  - { slug: cambiario, title: "Riesgo Cambiario", icon: "💱" }
+                  - { slug: liquidez,  title: "Riesgo de Liquidez", icon: "💧" }
+                message: null
+                errors: []
+
+  /api/risks/dashboard:
+    get:
+      tags: [Riesgos]
+      summary: Tablero ejecutivo consolidado (semáforos + alertas)
+      description: Reutiliza `Dashboard::resumenCache()`. Usa caché; `recalcular` fuerza recálculo.
+      parameters:
+        - { $ref: '#/components/parameters/preset' }
+        - { $ref: '#/components/parameters/ini' }
+        - { $ref: '#/components/parameters/fin' }
+        - { $ref: '#/components/parameters/fecha' }
+        - name: recalcular
+          in: query
+          required: false
+          schema: { type: string }
+          description: Si está presente, recalcula ignorando la caché.
+      responses:
+        '200': { description: Resumen consolidado, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/risks/{slug}:
+    get:
+      tags: [Riesgos]
+      summary: Datos estructurados de un informe de riesgo
+      description: Reutiliza `Panel::generar()['data']`. Resultados idénticos al sistema PHP.
+      parameters:
+        - { $ref: '#/components/parameters/slug' }
+        - { $ref: '#/components/parameters/preset' }
+        - { $ref: '#/components/parameters/ini' }
+        - { $ref: '#/components/parameters/fin' }
+        - { $ref: '#/components/parameters/fecha' }
+      responses:
+        '200':
+          description: Datos del informe
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  slug: cambiario
+                  ini: "2025-12-01"
+                  fin: "2025-12-30"
+                  informe: { total_saldos: 539232.10 }
+                message: null
+                errors: []
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/risks/{slug}/pdf:
+    get:
+      tags: [Riesgos]
+      summary: PDF del informe (visualizar o descargar)
+      description: Reutiliza `Panel::pdf()` (mismo mPDF que el sistema actual).
+      parameters:
+        - { $ref: '#/components/parameters/slug' }
+        - { $ref: '#/components/parameters/preset' }
+        - { $ref: '#/components/parameters/ini' }
+        - { $ref: '#/components/parameters/fin' }
+        - { $ref: '#/components/parameters/fecha' }
+        - { $ref: '#/components/parameters/disposition' }
+      responses:
+        '200':
+          description: Documento PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/logs:
+    get:
+      tags: [Logs]
+      summary: Catálogo de los 7 reportes de auditoría
+      responses:
+        '200': { description: Lista de reportes (code, title, db), content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/logs/excel/zip:
+    get:
+      tags: [Logs]
+      summary: ZIP mensual con los 7 reportes (.xlsx)
+      description: Reutiliza `Reportes::build()` + `Zip::build()`. Mismo nombre/formato del sistema actual.
+      parameters:
+        - { $ref: '#/components/parameters/periodo' }
+      responses:
+        '200':
+          description: Archivo ZIP
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/logs/{code}:
+    get:
+      tags: [Logs]
+      summary: Datos de un reporte de auditoría (hojas/columnas/filas)
+      description: Reutiliza `Reportes::data()` (igual que datos.php). Los filtros de columna/búsqueda se aplican en el frontend, igual que hoy.
+      parameters:
+        - { $ref: '#/components/parameters/code' }
+        - { $ref: '#/components/parameters/periodo' }
+      responses:
+        '200': { description: Datos del reporte, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/logs/{code}/excel:
+    get:
+      tags: [Logs]
+      summary: Excel .xlsx de un reporte de auditoría
+      parameters:
+        - { $ref: '#/components/parameters/code' }
+        - { $ref: '#/components/parameters/periodo' }
+        - { $ref: '#/components/parameters/disposition' }
+      responses:
+        '200':
+          description: Documento Excel
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/operations:
+    get:
+      tags: [Operaciones]
+      summary: Vistas operativas disponibles (acciones)
+      responses:
+        '200': { description: Lista de acciones, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/operations/{action}:
+    get:
+      tags: [Operaciones]
+      summary: Datos de una vista operativa/comercial
+      description: Reutiliza `api_dashboard.php` (única fuente). Angular reorganiza por categorías; la lógica no cambia.
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [operativo, utilidades, agencias, live, cajeros, precios, cotizaciones, plazas, saldos, horas, margen, tendencias, comparativo]
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+          example: "2026-07-01"
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+          example: "2026-07-31"
+      responses:
+        '200': { description: Resultado de la vista, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/discrepancies:
+    get:
+      tags: [Discrepancias]
+      summary: Listar discrepancias detectadas
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string }
+          description: Filtrar por tipo (ACCOUNTING_MISSING, RATE_DIFFERENT, etc.)
+        - name: severity
+          in: query
+          schema: { type: string, enum: [CRITICAL, HIGH, MEDIUM, LOW, TOLERANCE] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, IN_REVIEW, RESOLVED, FALSE_POSITIVE, IGNORED, ESCALATED] }
+        - name: operation_type
+          in: query
+          schema: { type: string }
+          description: Filtrar por tipo de operacion (cambio, remesa, asiento, etc.)
+        - name: desde
+          in: query
+          schema: { type: string, format: date }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Lista de discrepancias, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/discrepancies/summary:
+    get:
+      tags: [Discrepancias]
+      summary: Resumen de discrepancias por severidad, tipo y estado
+      parameters:
+        - name: desde
+          in: query
+          schema: { type: string, format: date }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Contadores agrupados, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/discrepancies/types:
+    get:
+      tags: [Discrepancias]
+      summary: Catalogo de tipos de discrepancia
+      responses:
+        '200': { description: Tipos agrupados por categoria, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/discrepancies/run:
+    post:
+      tags: [Discrepancias]
+      summary: Ejecutar reconciliacion manualmente
+      description: Lanza todos los checks del ReconciliationEngine y retorna cuantas discrepancias nuevas se crearon.
+      responses:
+        '200': { description: Resultado de la reconciliacion, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+
+  /api/discrepancies/{id}/resolve:
+    post:
+      tags: [Discrepancias]
+      summary: Resolver una discrepancia
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution_type: { type: string, example: MANUAL_EDIT_CONTA }
+                notes: { type: string, example: Corregido monto en asiento contable }
+                user_id: { type: integer, example: 1 }
+              required: [resolution_type, notes]
+      responses:
+        '200': { description: Discrepancia resuelta, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '404': { description: Discrepancia no encontrada o ya resuelta }
+
+components:
+  parameters:
+    slug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [cambiario, mercado, liquidez, operativo, plaft, seguridad]
+    code:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: ["00","01","02","03","04","05","06","07"]
+    preset:
+      name: preset
+      in: query
+      required: false
+      schema: { type: string, enum: [mes, dia, rango], default: mes }
+      description: "mes = del 1º del mes de 'fin' a 'fin'; dia = un solo día ('fecha'); rango = ini..fin."
+    ini:
+      name: ini
+      in: query
+      required: false
+      schema: { type: string, format: date }
+      description: Fecha inicial (preset=rango). AAAA-MM-DD.
+    fin:
+      name: fin
+      in: query
+      required: false
+      schema: { type: string, format: date }
+      description: Fecha de corte. AAAA-MM-DD. Por defecto hoy.
+    fecha:
+      name: fecha
+      in: query
+      required: false
+      schema: { type: string, format: date }
+      description: Día (preset=dia). AAAA-MM-DD.
+    periodo:
+      name: periodo
+      in: query
+      required: true
+      schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+      example: "2026-07"
+      description: Mes del reporte (AAAA-MM).
+    disposition:
+      name: disposition
+      in: query
+      required: false
+      schema: { type: string, enum: [inline, attachment], default: attachment }
+      description: inline = visualizar en el navegador; attachment = descargar.
+
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        data: {}
+        message: { type: string, nullable: true }
+        errors: { type: array, items: {} }
+      required: [success, data, message, errors]
+
+  responses:
+    ValidationError:
+      description: Parámetro inválido
+      content:
+        application/json:
+          example:
+            success: false
+            data: null
+            message: "Valor inválido para 'slug'. Permitidos: cambiario, mercado, liquidez, operativo, plaft, seguridad."
+            errors: []
