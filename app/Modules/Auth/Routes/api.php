@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
     Route::post('/login',    [AuthController::class, 'login']);
+    Route::post('/refresh',  [AuthController::class, 'refresh']);
     Route::get('/agencies',  [AuthController::class, 'agencies']);
 
     Route::middleware('jwt')->group(function () {

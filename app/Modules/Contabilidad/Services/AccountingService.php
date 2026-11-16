@@ -232,7 +232,7 @@ class AccountingService
                 COUNT(CASE WHEN sc.conciliacion = 'ET' THEN 1 END) AS transferencia_boveda_ingreso_cnt,
                 SUM(CASE WHEN sc.conciliacion = 'EO' THEN sc.saldo ELSE 0 END) AS traspaso_de_caja,
                 COUNT(CASE WHEN sc.conciliacion = 'EO' THEN 1 END) AS traspaso_de_caja_cnt,
-                SUM(CASE WHEN sc.conciliacion IN ('EE','RB') THEN sc.saldo ELSE 0 END) AS cobro_cheque,
+                SUM(CASE WHEN sc.conciliacion IN ('EE','RB', 'IC') THEN sc.saldo ELSE 0 END) AS cobro_cheque,
                 COUNT(CASE WHEN sc.conciliacion IN ('EE','RB') THEN 1 END) AS cobro_cheque_cnt,
                 SUM(CASE WHEN sc.conciliacion = 'IA' THEN sc.saldo ELSE 0 END) AS ingreso_controlado,
                 COUNT(CASE WHEN sc.conciliacion = 'IA' THEN 1 END) AS ingreso_controlado_cnt,
