@@ -23,6 +23,12 @@ Route::prefix('cajero')->middleware(['jwt', 'role:1,2,4,6'])->group(function () 
 
     // Cambio de moneda
     Route::get('/cotizaciones',     [CajeroCambioController::class, 'cotizaciones']);
+    Route::get('/gestion-cotizaciones', [CajeroCambioController::class, 'gestionCotizaciones'])->middleware('role:1,2,4,6');
+    Route::put('/gestion-cotizaciones', [CajeroCambioController::class, 'actualizarCotizacion'])->middleware('role:1,2,4,6');
+    Route::get('/cotizaciones-programadas', [CajeroCambioController::class, 'listarCotizacionesProgramadas'])->middleware('role:1,2,4,6');
+    Route::get('/cotizaciones-programadas/{id}', [CajeroCambioController::class, 'detalleCotizacionProgramada'])->where('id', '[0-9]+')->middleware('role:1,2,4,6');
+    Route::get('/cotizaciones-programadas/{id}/pdf', [CajeroCambioController::class, 'pdfCotizacionProgramada'])->where('id', '[0-9]+')->middleware('role:1,2,4,6');
+    Route::post('/cotizaciones-programadas', [CajeroCambioController::class, 'crearCotizacionProgramada'])->middleware('role:1,2,4,6');
     Route::get('/buscar-cliente',      [CajeroCambioController::class, 'buscarCliente']);
     Route::post('/actualizar-cliente', [CajeroCambioController::class, 'actualizarCliente']);
     Route::get('/catalogos',        [CajeroCambioController::class, 'catalogos']);

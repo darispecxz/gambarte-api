@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Contabilidad\Controllers\AccountingController;
+use App\Modules\Contabilidad\Controllers\CashAuditController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('accounting')->middleware(['jwt', 'role:1,2,3,7,8'])->group(function () {
@@ -16,4 +17,11 @@ Route::prefix('accounting')->middleware(['jwt', 'role:1,2,3,7,8'])->group(functi
     Route::get('/comprobantes',     [AccountingController::class, 'comprobantes']);
     Route::get('/asiento-detalle',  [AccountingController::class, 'asientoDetalle']);
     Route::get('/export',           [AccountingController::class, 'export']);
+});
+
+Route::prefix('accounting/cash-audit')->middleware(['jwt', 'role:2'])->group(function () {
+    Route::get('/pdf', [CashAuditController::class, 'pdf']);
+    Route::get('/{idCaja}', [CashAuditController::class, 'detail'])->whereNumber('idCaja');
+    Route::post('/{idCaja}/followups', [CashAuditController::class, 'followup'])->whereNumber('idCaja');
+    Route::get('/', [CashAuditController::class, 'report']);
 });

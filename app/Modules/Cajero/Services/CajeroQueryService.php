@@ -195,7 +195,8 @@ class CajeroQueryService
             return null;
         }
 
-        return $this->balance->saldoBoveda((int) $boveda['id_boveda'], $fecha);
+        $saldoBoveda = $this->balance->saldoBoveda((int) $boveda['id_boveda'], $fecha);
+        return max(0, $saldoBoveda - (float) $boveda['minimo']);
     }
 
     private function contarMovimientos(int $idCaja, string $fecha): int

@@ -3,6 +3,8 @@
 namespace App\Modules\Cajero\Controllers;
 
 use App\Modules\Cajero\Services\CajeroCambioService;
+use App\Modules\Cajero\Services\CajeroCotizacionService;
+use App\Modules\Cajero\Services\CajeroCotizacionProgramadaService;
 use App\Modules\Facturacion\SiatClient;
 use App\Modules\Operaciones\Services\OperationsReportService;
 use App\Modules\Shared\Database\RawConnection as DB;
@@ -14,11 +16,15 @@ class CajeroCambioController extends ApiController
 {
     private CajeroCambioService $service;
     private OperationsReportService $reportService;
+    private CajeroCotizacionService $cotizacionService;
+    private CajeroCotizacionProgramadaService $programadaService;
 
-    public function __construct(CajeroCambioService $service, OperationsReportService $reportService)
+    public function __construct(CajeroCambioService $service, OperationsReportService $reportService, CajeroCotizacionService $cotizacionService, CajeroCotizacionProgramadaService $programadaService)
     {
         $this->service = $service;
         $this->reportService = $reportService;
+        $this->cotizacionService = $cotizacionService;
+        $this->programadaService = $programadaService;
     }
 
     private function claims(Request $request): array
@@ -31,6 +37,84 @@ class CajeroCambioController extends ApiController
         $claims = $this->claims($request);
         $idAgencia = $claims['agencia']['id_agencia'];
         return $this->ok($this->service->cotizaciones($idAgencia));
+    }
+
+    public function gestionCotizaciones(Request $request): JsonResponse
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? $claims['user']['id_rol'] ?? 0);
+        $agencia = $request->query('id_agencia');
+        return $this->ok($this->cotizacionService->dashboard((int) $claims['agencia']['id_agencia'], $rol, $agencia ? (int) $agencia : null));
+    }
+
+    public function actualizarCotizacion(Request $request): JsonResponse
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? $claims['user']['id_rol'] ?? 0);
+        try {
+            $data = $this->cotizacionService->update($request->all(), (int) $claims['agencia']['id_agencia'], $rol, (int) $claims['user']['cod_usuario']);
+            return $this->ok($data, 'Cotización actualizada correctamente.');
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+    }
+
+    public function listarCotizacionesProgramadas(Request $request): JsonResponse
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? 0);
+        $listado = $this->programadaService->listar(
+            (int) $claims['agencia']['id_agencia'],
+            $rol,
+            $request->query('estado'),
+            $request->query('busqueda'),
+            max(1, (int) $request->query('pagina', 1)),
+            (int) $request->query('por_pagina', 10)
+        );
+        return $this->ok([
+            ...$listado,
+            'monedas' => $this->programadaService->catalogo((int) $claims['agencia']['id_agencia']),
+        ]);
+    }
+
+    public function detalleCotizacionProgramada(Request $request, int $id): JsonResponse
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? 0);
+        try {
+            return $this->ok($this->programadaService->detalle($id, (int) $claims['agencia']['id_agencia'], $rol));
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), 404);
+        }
+    }
+
+    public function crearCotizacionProgramada(Request $request): JsonResponse
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? 0);
+        try {
+            $id = $this->programadaService->crear($request->all(), (int) $claims['agencia']['id_agencia'], $rol, (int) $claims['user']['cod_usuario'], (string) $claims['user']['login']);
+            return $this->ok(['id_cotizacion' => $id], 'Cotización programada creada correctamente.');
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+    }
+
+    public function pdfCotizacionProgramada(Request $request, int $id)
+    {
+        $claims = $this->claims($request);
+        $rol = (int) ($claims['rol']['id_rol'] ?? 0);
+        try {
+            $result = $this->programadaService->pdf($id, (int) $claims['agencia']['id_agencia'], $rol);
+            return response($result['binary'], 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $result['filename'] . '"',
+                'Content-Length' => strlen($result['binary']),
+                'Cache-Control' => 'no-store',
+            ]);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), 404);
+        }
     }
 
     public function buscarCliente(Request $request): JsonResponse

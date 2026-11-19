@@ -11,6 +11,7 @@ class AuthService
     private AuthRepository $repo;
     private string $secret;
     private int    $ttl;
+    private int    $refreshTtl;
     private string $algo;
     private string $issuer;
 
@@ -19,6 +20,7 @@ class AuthService
         $this->repo   = $repo;
         $this->secret = config('jwt.secret');
         $this->ttl    = config('jwt.ttl');
+        $this->refreshTtl = config('jwt.refresh_ttl');
         $this->algo   = config('jwt.algo');
         $this->issuer = config('jwt.issuer');
     }
@@ -44,12 +46,8 @@ class AuthService
             return ['error' => 'Usuario sin rol activo asignado.', 'status' => 403];
         }
 
-        $now = time();
-        $payload = [
-            'iss'  => $this->issuer,
-            'iat'  => $now,
-            'exp'  => $now + $this->ttl,
-            'sub'  => (int) $user['cod_usuario'],
+        $identity = [
+            'sub' => (int) $user['cod_usuario'],
             'user' => [
                 'cod_usuario'    => (int) $user['cod_usuario'],
                 'login'          => $user['login_usu'],
@@ -68,14 +66,80 @@ class AuthService
             ],
         ];
 
-        $token = JWT::encode($payload, $this->secret, $this->algo);
+        return $this->issueTokens($identity);
+    }
+
+    public function refresh(string $refreshToken): ?array
+    {
+        try {
+            $decoded = JWT::decode($refreshToken, new Key($this->secret, $this->algo));
+            $claims = json_decode(json_encode($decoded), true);
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'refresh' || empty($claims['sub'])) {
+            return null;
+        }
+
+        $user = $this->repo->findActiveUserById((int) $claims['sub']);
+        $agencyId = (int) ($claims['agencia']['id_agencia'] ?? 0);
+        if (!$user || !$agencyId) {
+            return null;
+        }
+
+        $access = $this->repo->userHasAgencyAccess((int) $user['cod_usuario'], $agencyId);
+        $role = $this->repo->getUserActiveRole((int) $user['cod_usuario']);
+        if (!$access || !$role) {
+            return null;
+        }
+
+        $identity = [
+            'sub' => (int) $user['cod_usuario'],
+            'user' => [
+                'cod_usuario' => (int) $user['cod_usuario'],
+                'login' => $user['login_usu'],
+                'nombre' => trim($user['nombre_completo']),
+                'email' => $user['email_corp'],
+            ],
+            'agencia' => [
+                'id_agencia' => (int) $access['id_agencia'],
+                'cod_agencia' => $access['cod_agencia'],
+                'descripcion' => $access['agencia_descripcion'],
+                'abreviatura' => $access['abreviatura'],
+            ],
+            'rol' => [
+                'id_rol' => (int) $role['id_rol'],
+                'descripcion' => $role['rol_descripcion'],
+            ],
+        ];
+
+        return $this->issueTokens($identity);
+    }
+
+    private function issueTokens(array $identity): array
+    {
+        $now = time();
+        $payload = array_merge($identity, [
+            'iss' => $this->issuer,
+            'iat' => $now,
+            'exp' => $now + $this->ttl,
+        ]);
+        $refreshPayload = array_merge($identity, [
+            'iss' => $this->issuer,
+            'iat' => $now,
+            'exp' => $now + $this->refreshTtl,
+            'type' => 'refresh',
+        ]);
 
         return [
-            'token'      => $token,
+            'token'      => JWT::encode($payload, $this->secret, $this->algo),
+            'refresh_token' => JWT::encode($refreshPayload, $this->secret, $this->algo),
             'expires_in' => $this->ttl,
-            'user'       => $payload['user'],
-            'agencia'    => $payload['agencia'],
-            'rol'        => $payload['rol'],
+            'refresh_expires_in' => $this->refreshTtl,
+            'user'       => $identity['user'],
+            'agencia'    => $identity['agencia'],
+            'rol'        => $identity['rol'],
         ];
     }
 

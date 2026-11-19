@@ -19,6 +19,19 @@ class AuthRepository
         );
     }
 
+    public function findActiveUserById(int $codUsuario): ?array
+    {
+        return RawConnection::selectOne(
+            "SELECT u.cod_usuario, u.cod_trab, u.login_usu, u.clave_usu,
+                    u.email_corp, u.estado, u.fec_ult_cambio_clave,
+                    CONCAT(t.nom_trab, ' ', t.ape_pat_trab, ' ', IFNULL(t.ape_mat_trab, '')) AS nombre_completo
+             FROM usuario u
+             INNER JOIN trabajador t ON t.cod_trab = u.cod_trab
+             WHERE u.cod_usuario = ? AND u.estado = 'A'",
+            [$codUsuario]
+        );
+    }
+
     public function userHasAgencyAccess(int $codUsuario, int $idAgencia): ?array
     {
         return RawConnection::selectOne(

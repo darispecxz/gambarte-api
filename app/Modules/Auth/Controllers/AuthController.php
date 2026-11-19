@@ -46,6 +46,18 @@ class AuthController extends ApiController
         return $this->ok($agencies);
     }
 
+    public function refresh(Request $request): JsonResponse
+    {
+        $refreshToken = (string) $request->input('refresh_token', '');
+        $result = $refreshToken ? $this->auth->refresh($refreshToken) : null;
+
+        if (!$result) {
+            return $this->error('La sesión de renovación es inválida o expiró.', 401);
+        }
+
+        return $this->ok($result, 'Token renovado.');
+    }
+
     public function me(Request $request): JsonResponse
     {
         $claims = $request->attributes->get('jwt_claims');
