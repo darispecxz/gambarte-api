@@ -33,6 +33,7 @@ class ModuleServiceProvider extends ServiceProvider
             'Cripto',
             'UtilidadCambiaria',
             'Manuales',
+            'Recargas',
         ];
 
         foreach ($modules as $module) {
