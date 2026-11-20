@@ -9,6 +9,25 @@
 
 ## Configuración (sin secretos en Git)
 
+### Pruebas UAT sin conexión con Chile
+
+En **el backend Laravel del entorno UAT solamente**, configurar:
+
+```dotenv
+APP_ENV=uat
+RECARGAS_UAT_SIMULATION=true
+```
+
+Limpiar la caché de configuración (`php artisan config:clear`, o regenerarla) y desplegar la rama de integración. No es necesario definir `RECARGAS_CHILE_URL` ni credenciales de Chile para estas pruebas. El backend utiliza `UatRecargasSimulator` y **no crea conexiones ni escribe registros en las bases CGR/Chile**. Los endpoints existentes del POS siguen requiriendo JWT y roles autorizados.
+
+El simulador contiene cuatro solicitudes de prueba (IDs 900001–900004) y cuatro líneas (IDs 910001–910004), con una línea ENTEL de saldo insuficiente para verificar rechazos. Los estados y saldos se mantienen en `Cache::store('file')` durante 24 horas. No se usa base de datos ni se ejecuta una recarga telefónica real. La pantalla Angular muestra una advertencia visible de modo simulado.
+
+**Protección contra producción:** el modo solo puede activarse cuando se cumplen simultáneamente `APP_ENV=uat` y `RECARGAS_UAT_SIMULATION=true`. En cualquier otro entorno, la puerta de enlace utiliza el cliente real de Chile, que a su vez exige HTTPS y HMAC configurados. Para desactivarlo, poner `RECARGAS_UAT_SIMULATION=false` y limpiar caché de configuración.
+
+**Prueba sugerida:** consultar pendientes, reservar ID 900001, intentar reservarlo desde otra sesión, seleccionar línea 910002 (saldo insuficiente), confirmar con línea 910001, verificar saldo descontado, repetir confirmación con la misma referencia y comprobar que no haya segundo descuento. Probar liberación y expiración de reservas.
+
+Estas pruebas son de interfaz y flujo; no validan la conectividad ni las transacciones de producción en Chile.
+
 En Laravel, definir `RECARGAS_CHILE_URL` (HTTPS, sin barra final), `RECARGAS_CHILE_CLIENT_ID`, `RECARGAS_CHILE_SECRET` (>=32 caracteres aleatorios). Limpiar caché de configuración.
 
 En PHP Chile, definir `RCR_INTEGRATION_CLIENT_ID`, `RCR_INTEGRATION_SECRET` idénticos a los de Laravel, y ejecutar previamente `database/migrations/integracion_recargas.sql` en una ventana controlada y con backup. Ajustar Apache/reverse proxy para exponer PATH_INFO y comunicar HTTPS correctamente a PHP.
