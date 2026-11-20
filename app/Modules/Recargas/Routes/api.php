@@ -11,3 +11,7 @@ Route::prefix('cajero/recargas')->middleware(['jwt', 'role:1,2,4,6'])->group(fun
     Route::post('/{id}/confirmar', [RecargasController::class, 'confirmar'])->where('id', '[0-9]+');
     Route::post('/{id}/liberar', [RecargasController::class, 'liberar'])->where('id', '[0-9]+');
 });
+
+Route::prefix('cajero/recargas')->middleware(['jwt', 'role:2'])->group(function () {
+    Route::post('/uat/reiniciar', [RecargasController::class, 'reiniciarUat']);
+});
