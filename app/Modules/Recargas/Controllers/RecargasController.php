@@ -4,6 +4,7 @@ namespace App\Modules\Recargas\Controllers;
 
 use App\Modules\Recargas\Services\RecargasGateway;
 use App\Modules\Recargas\Services\UatSimulationException;
+use App\Modules\Recargas\Services\UatRecargasSimulator;
 use App\Modules\Shared\Http\ApiController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,6 +43,16 @@ class RecargasController extends ApiController
     public function modo(): JsonResponse
     {
         return $this->ok(['simulated' => $this->gateway->isSimulated()]);
+    }
+
+    public function reiniciarUat(UatRecargasSimulator $simulator): JsonResponse
+    {
+        try {
+            $simulator->reset();
+            return $this->ok(['reset' => true], 'Datos simulados reiniciados');
+        } catch (UatSimulationException $e) {
+            return $this->error($e->getMessage(), 403);
+        }
     }
 
     public function lineas(): JsonResponse
