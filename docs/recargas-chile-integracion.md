@@ -26,6 +26,8 @@ El simulador contiene cuatro solicitudes de prueba (IDs 900001–900004) y cuatr
 
 **Prueba sugerida:** consultar pendientes, reservar ID 900001, intentar reservarlo desde otra sesión, seleccionar línea 910002 (saldo insuficiente), confirmar con línea 910001, verificar saldo descontado, repetir confirmación con la misma referencia y comprobar que no haya segundo descuento. Probar liberación y expiración de reservas.
 
+Para repetir el escenario desde cero, un usuario administrador (rol 2) puede llamar `POST /api/cajero/recargas/uat/reiniciar` con su JWT. Este endpoint solo elimina el estado ficticio de la caché de UAT, está bloqueado fuera de `APP_ENV=uat` con el flag activado y **nunca toca datos reales**.
+
 Estas pruebas son de interfaz y flujo; no validan la conectividad ni las transacciones de producción en Chile.
 
 En Laravel, definir `RECARGAS_CHILE_URL` (HTTPS, sin barra final), `RECARGAS_CHILE_CLIENT_ID`, `RECARGAS_CHILE_SECRET` (>=32 caracteres aleatorios). Limpiar caché de configuración.
