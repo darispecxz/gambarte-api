@@ -2,7 +2,8 @@
 
 namespace App\Modules\Recargas\Controllers;
 
-use App\Modules\Recargas\Services\ChileRecargasClient;
+use App\Modules\Recargas\Services\RecargasGateway;
+use App\Modules\Recargas\Services\UatSimulationException;
 use App\Modules\Shared\Http\ApiController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,12 +11,14 @@ use Throwable;
 
 class RecargasController extends ApiController
 {
-    public function __construct(private ChileRecargasClient $chile) {}
+    public function __construct(private RecargasGateway $gateway) {}
 
     private function execute(string $method, string $path, array $payload = []): JsonResponse
     {
         try {
-            return $this->ok($this->chile->request($method, $path, $payload));
+            return $this->ok($this->gateway->request($method, $path, $payload));
+        } catch (UatSimulationException $e) {
+            return $this->error($e->getMessage(), 409);
         } catch (Throwable $e) {
             report($e);
             return $this->error('El servicio de recargas de Chile no está disponible o rechazó la operación. Verifique el estado antes de reintentar.', 502);
@@ -34,6 +37,11 @@ class RecargasController extends ApiController
     public function pendientes(): JsonResponse
     {
         return $this->execute('GET', '/api/integracion/recargas.php/pendientes');
+    }
+
+    public function modo(): JsonResponse
+    {
+        return $this->ok(['simulated' => $this->gateway->isSimulated()]);
     }
 
     public function lineas(): JsonResponse
