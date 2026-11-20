@@ -3,6 +3,7 @@
 namespace App\Modules\Recargas\Services;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Isolated, persistent UAT fixtures. Never connects to Chile or to CGR databases.
@@ -122,11 +123,33 @@ class UatRecargasSimulator
         $amount = (float) $recarga['monto_bob'];
         if ((float) $line['saldo_bob'] < $amount) throw new UatSimulationException('Saldo insuficiente en la línea de prueba');
 
+        $receipt = $this->saveReceipt($recarga['id_detalle_recarga'], $payload['comprobante'] ?? null);
+
         $state['lineas'][$lineId]['saldo_bob'] = number_format((float) $line['saldo_bob'] - $amount, 2, '.', '');
         $recarga['estado'] = 1;
         $recarga['reserva']['estado'] = 'CONFIRMADA';
         $recarga['reserva']['id_linea'] = $lineId;
-        return ['estado' => 'CONFIRMADA', 'id_linea' => $lineId];
+        $recarga['reserva']['comprobante'] = $receipt;
+        return ['estado' => 'CONFIRMADA', 'id_linea' => $lineId, 'comprobante' => ['sha256' => $receipt['sha256']]];
+    }
+
+    private function saveReceipt(int $id, $input): array
+    {
+        if (!is_array($input) || !is_string($input['contenido_base64'] ?? null)) {
+            throw new UatSimulationException('El comprobante es obligatorio');
+        }
+        $bytes = base64_decode($input['contenido_base64'], true);
+        if ($bytes === false || strlen($bytes) < 1 || strlen($bytes) > 2 * 1024 * 1024) {
+            throw new UatSimulationException('Comprobante inválido o demasiado grande');
+        }
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+        $extensions = ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'];
+        if (!isset($extensions[$mime])) throw new UatSimulationException('Formato de comprobante no permitido');
+        $path = 'recargas-uat/comprobantes/' . $id . '-' . bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+        if (!Storage::disk('local')->put($path, $bytes)) {
+            throw new UatSimulationException('No se pudo guardar el comprobante UAT');
+        }
+        return ['ruta' => $path, 'mime' => $mime, 'sha256' => hash('sha256', $bytes)];
     }
 
     private function fixtures(): array
