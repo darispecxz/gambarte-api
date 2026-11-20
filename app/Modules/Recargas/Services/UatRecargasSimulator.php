@@ -14,6 +14,17 @@ class UatRecargasSimulator
     private const TTL = 86400;
     private const PATH = '/api/integracion/recargas.php';
 
+    public function reset(): void
+    {
+        if (!app()->environment('uat') || config('services.recargas.uat_simulation') !== true) {
+            throw new UatSimulationException('Simulador deshabilitado');
+        }
+        $cache = Cache::store('file');
+        $cache->lock(self::KEY . ':lock', 10)->block(5, function () use ($cache): void {
+            $cache->forget(self::KEY);
+        });
+    }
+
     public function request(string $method, string $path, array $payload): array
     {
         if (!app()->environment('uat') || config('services.recargas.uat_simulation') !== true) {
