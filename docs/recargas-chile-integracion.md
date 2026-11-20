@@ -20,11 +20,11 @@ RECARGAS_UAT_SIMULATION=true
 
 Limpiar la caché de configuración (`php artisan config:clear`, o regenerarla) y desplegar la rama de integración. No es necesario definir `RECARGAS_CHILE_URL` ni credenciales de Chile para estas pruebas. El backend utiliza `UatRecargasSimulator` y **no crea conexiones ni escribe registros en las bases CGR/Chile**. Los endpoints existentes del POS siguen requiriendo JWT y roles autorizados.
 
-El simulador contiene cuatro solicitudes de prueba (IDs 900001–900004) y cuatro líneas (IDs 910001–910004), con una línea ENTEL de saldo insuficiente para verificar rechazos. Los estados y saldos se mantienen en `Cache::store('file')` durante 24 horas. No se usa base de datos ni se ejecuta una recarga telefónica real. La pantalla Angular muestra una advertencia visible de modo simulado.
+El simulador contiene cuatro solicitudes de prueba (IDs 900001–900004) y cuatro líneas (IDs 910001–910004), con una línea ENTEL de saldo insuficiente para verificar rechazos. Los estados y saldos se mantienen en `Cache::store('file')` durante 24 horas. Los comprobantes adjuntos se guardan en el disco privado `local` de Laravel bajo `recargas-uat/comprobantes/`, sin base de datos ni contacto con Chile. La pantalla Angular muestra una advertencia visible de modo simulado.
 
 **Protección contra producción:** el modo solo puede activarse cuando se cumplen simultáneamente `APP_ENV=uat` y `RECARGAS_UAT_SIMULATION=true`. En cualquier otro entorno, la puerta de enlace utiliza el cliente real de Chile, que a su vez exige HTTPS y HMAC configurados. Para desactivarlo, poner `RECARGAS_UAT_SIMULATION=false` y limpiar caché de configuración.
 
-**Prueba sugerida:** consultar pendientes, reservar ID 900001, intentar reservarlo desde otra sesión, seleccionar línea 910002 (saldo insuficiente), confirmar con línea 910001, verificar saldo descontado, repetir confirmación con la misma referencia y comprobar que no haya segundo descuento. Probar liberación y expiración de reservas.
+**Prueba sugerida:** consultar pendientes, reservar ID 900001, intentar reservarlo desde otra sesión, seleccionar línea 910002 (saldo insuficiente), adjuntar PDF/JPG/PNG válido (máximo 2 MB), confirmar con línea 910001, verificar saldo descontado y archivo guardado bajo `storage/app/recargas-uat/comprobantes/`. Probar archivo ausente, tamaño excesivo y tipo no permitido; repetir confirmación con igual token y comprobar que no haya segundo descuento. Probar liberación y expiración de reservas.
 
 Para repetir el escenario desde cero, un usuario administrador (rol 2) puede llamar `POST /api/cajero/recargas/uat/reiniciar` con su JWT. Este endpoint solo elimina el estado ficticio de la caché de UAT, está bloqueado fuera de `APP_ENV=uat` con el flag activado y **nunca toca datos reales**.
 
@@ -32,7 +32,9 @@ Estas pruebas son de interfaz y flujo; no validan la conectividad ni las transac
 
 En Laravel, definir `RECARGAS_CHILE_URL` (HTTPS, sin barra final), `RECARGAS_CHILE_CLIENT_ID`, `RECARGAS_CHILE_SECRET` (>=32 caracteres aleatorios). Limpiar caché de configuración.
 
-En PHP Chile, definir `RCR_INTEGRATION_CLIENT_ID`, `RCR_INTEGRATION_SECRET` idénticos a los de Laravel, y ejecutar previamente `database/migrations/integracion_recargas.sql` en una ventana controlada y con backup. Ajustar Apache/reverse proxy para exponer PATH_INFO y comunicar HTTPS correctamente a PHP.
+En PHP Chile, definir `RCR_INTEGRATION_CLIENT_ID`, `RCR_INTEGRATION_SECRET` idénticos a los de Laravel y `RCR_PRIVATE_RECEIPTS_DIR` como directorio absoluto existente, escribible por PHP, **fuera del document root**. Crear con permisos restringidos antes de desplegar; no servirlo mediante Apache/nginx. Ejecutar previamente `database/migrations/integracion_recargas.sql` y `database/migrations/integracion_recarga_comprobante.sql` en una ventana controlada y con backup. Ajustar Apache/reverse proxy para exponer PATH_INFO y comunicar HTTPS correctamente a PHP.
+
+La confirmación se envía desde Angular como `multipart/form-data` a Laravel. Laravel valida la extensión, tipo real y tamaño (máximo 2 MB), luego transmite el archivo en base64 dentro del JSON firmado con HMAC hacia Chile. Chile valida nuevamente contenido y tipo con `finfo`, guarda el archivo privado y registra ruta, MIME y SHA-256 en `integracion_recarga_comprobante`, asociado al `id_detalle_recarga`. Aumentar el límite del body HTTP/PHP para admitir la expansión base64 (recomendado 4 MB). No guardar comprobantes en un directorio público. La observación es opcional y no sustituye al archivo.
 
 ## Firma HMAC v1
 
@@ -43,7 +45,7 @@ En PHP Chile, definir `RCR_INTEGRATION_CLIENT_ID`, `RCR_INTEGRATION_SECRET` idé
 1. `GET pendientes`: últimos 200 detalles con `estado=0` sin reservas vigentes.
 2. `POST {id}/reservar` con `request_id` UUID: reserva exclusiva por 5 minutos. Repetir el mismo ID devuelve la misma reserva mientras esté vigente.
 3. El operador realiza la recarga real fuera del sistema.
-4. `POST {id}/confirmar` requiere `request_id`, `token`, `id_linea`; la API Chile bloquea las filas, valida proveedor y saldo y actualiza detalle y saldo en la misma transacción. Repetir confirmación devuelve el estado confirmado sin otro descuento.
+4. `POST {id}/confirmar` requiere `request_id`, `token`, `id_linea` y `comprobante` (archivo PDF/JPG/PNG); la API Chile bloquea las filas, valida proveedor, saldo y comprobante, registra el comprobante y actualiza detalle y saldo en la misma transacción. Repetir confirmación devuelve el estado confirmado sin otro descuento.
 5. `POST {id}/liberar` libera una reserva aún no confirmada.
 
 ## Requisitos antes del despliegue
