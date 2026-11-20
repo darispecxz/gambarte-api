@@ -71,7 +71,14 @@ class RecargasController extends ApiController
         $data = $request->validate([
             'request_id' => 'required|uuid', 'token' => 'required|string|size:64',
             'id_linea' => 'required|integer|min:1', 'glosa' => 'nullable|string|max:240',
+            'comprobante' => 'required|file|max:2048|mimes:pdf,jpg,jpeg,png',
         ]);
+        $file = $request->file('comprobante');
+        $data['comprobante'] = [
+            'nombre' => basename($file->getClientOriginalName()),
+            'mime' => $file->getMimeType(),
+            'contenido_base64' => base64_encode(file_get_contents($file->getRealPath())),
+        ];
         return $this->execute('POST', "/api/integracion/recargas.php/{$id}/confirmar", $data + $this->operator($request));
     }
 
