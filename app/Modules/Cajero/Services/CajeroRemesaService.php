@@ -804,7 +804,7 @@ class CajeroRemesaService
             if ($idMoneda === 3) {
                 return $this->comisionHabitualCLP($idAgencia, $idMoneda, $idOperacion, $montoEnviado, $idDestino);
             } elseif ($idMoneda === 2) {
-                return $this->comisionHabitualBOB($idAgencia, $idMoneda, $idOperacion, $montoEnviado, $incluirComision);
+                return $this->comisionHabitualBOB($idAgencia, $idMoneda, $idOperacion, $montoEnviado, $incluirComision, $idDestino);
             } else {
                 return $this->comisionHabitualUSD($idAgencia, $idMoneda, $idOperacion, $montoEnviado, $idDestino, $incluirComision);
             }
@@ -1056,7 +1056,7 @@ class CajeroRemesaService
         ];
     }
 
-    private function comisionHabitualBOB(int $idAgencia, int $idMoneda, int $idOperacion, float $montoEnviado, int $incluirComision = 1): array
+    private function comisionHabitualBOB(int $idAgencia, int $idMoneda, int $idOperacion, float $montoEnviado, int $incluirComision = 1, int $idDestino = 1): array
     {
         $cotOficial = $this->getCotizacionVenta(1, $idAgencia);
         $cotOficialCompra = $this->getCotizacionOficialCompra(1);
@@ -1105,7 +1105,7 @@ class CajeroRemesaService
             $gambarteBob = 0;
         }
 
-        $tcParalelo = $this->getCotizacionParalela($idAgencia, 1);
+        $tcParalelo = $this->getCotizacionParalelaLegacy($idAgencia, 1);
         $equivalenteUsd = $montoNetoBob / $tcParalelo;
 
         return [
@@ -1139,8 +1139,8 @@ class CajeroRemesaService
             'monto_enviado_x' => $montoNetoBob,
             'is_preferencial' => false,
             'equivalente_usd' => $equivalenteUsd,
-            'total_clp' => $this->calcularTotalClpParaBob($montoNetoBob, $tcParalelo, 1),
-            'tipo_cambio_clp' => $this->obtenerTcClpUsd(1),
+            'total_clp' => $this->calcularTotalClpParaBob($montoNetoBob, $tcParalelo, $idDestino),
+            'tipo_cambio_clp' => $this->obtenerTcClpUsd($idDestino),
         ];
     }
 
@@ -3512,6 +3512,20 @@ HTML;
               AND DATE(fec_crea_cotizacion_oficial) <= CURDATE()
             ORDER BY fec_crea_cotizacion_oficial DESC LIMIT 1
         ", [':mon' => $idMoneda]) ?: 1.0;
+    }
+
+    /**
+     * Replica la selección de cotización del legacy para remesas en BOB.
+     * El legacy hace un SELECT sin ORDER BY y toma la primera fila; escoger
+     * siempre la última cotización cambia el equivalente USD y CLP.
+     */
+    private function getCotizacionParalelaLegacy(int $idAgencia, int $idMoneda): float
+    {
+        return (float) DB::scalar("
+            SELECT valor FROM cotizacion
+            WHERE id_agencia = :ag AND id_moneda = :mon AND id_operacion = 4 AND estado = 'I'
+            LIMIT 1
+        ", [':ag' => $idAgencia, ':mon' => $idMoneda]) ?: 1.0;
     }
 
     private function getCotizacionParalela(int $idAgencia, int $idMoneda): float
