@@ -8,11 +8,13 @@ class CajeroSessionService
 {
     private CajeroQueryService $query;
     private CajeroBalanceService $balance;
+    private CajeroIncidenciaService $incidencias;
 
-    public function __construct(CajeroQueryService $query, CajeroBalanceService $balance)
+    public function __construct(CajeroQueryService $query, CajeroBalanceService $balance, CajeroIncidenciaService $incidencias)
     {
         $this->query = $query;
         $this->balance = $balance;
+        $this->incidencias = $incidencias;
     }
 
     public function apertura(int $codUsuario, int $idAgencia, int $idCaja, array $montos, string $ip): array
@@ -111,7 +113,7 @@ class CajeroSessionService
         });
     }
 
-    public function cierre(int $codUsuario, int $idAgencia, int $idCaja, array $montos, string $ip): array
+    public function cierre(int $codUsuario, int $idAgencia, int $idCaja, array $montos, string $ip, string $justificacion = ''): array
     {
         $fecha = date('Y-m-d');
 
@@ -143,6 +145,8 @@ class CajeroSessionService
 
         $saldoEsperado = $this->query->saldoActual($idCaja, $fecha);
         $diferencia = round($saldoCierre - $saldoEsperado, 4);
+        try { $this->incidencias->registrar($idCaja, $idAgencia, $codUsuario, $diferencia, $justificacion); }
+        catch (\RuntimeException $e) { return ['success'=>false,'message'=>$e->getMessage()]; }
 
         $boveda = DB::selectOne(
             "SELECT * FROM boveda WHERE id_agencia = :ag AND id_moneda = :mon",

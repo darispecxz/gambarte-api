@@ -182,8 +182,14 @@ class UtilidadService
     }
 
     /**
-     * Operaciones crudas (compras op=1 / ventas op=2) de la tabla `cambio`,
-     * normalizadas y con el filtro de operaciones ficticias de 3 patas (CLP).
+     * Operaciones que alimentan el Kardex: compras de cambio (op=1), ventas
+     * (op=2) y divisas cobradas en una remesa (op=3).
+     *
+     * Una remesa cobrada en USD es una entrada física de efectivo (saldo_caja,
+     * conciliación ER), aunque no sea una operación de cambio. Debe entrar a la
+     * cola FIFO al TC de compra vigente en la agencia y hora de la remesa; de lo
+     * contrario, una venta posterior puede consumir un inventario incompleto y
+     * aparentar una pérdida.
      */
     public function operacionesCrudas(string $fin, string $desde, ?int $id_agencia = null, ?int $id_moneda = null): array
     {
@@ -202,7 +208,10 @@ class UtilidadService
             c.id_operacion AS op,
             CASE WHEN c.id_operacion = 1 THEN c.monto ELSE c.total_cambio END AS monto_me,
             c.total_operacion_bob AS bob,
-            c.fec_crea_cambio AS fecha
+            c.fec_crea_cambio AS fecha,
+            NULL AS tc_lote,
+            'cambio' AS origen,
+            NULL AS referencia
         FROM cambio c
         JOIN usuario u ON u.cod_usuario = c.cod_usuario
         JOIN trabajador t ON t.cod_trab = u.cod_trab
@@ -236,14 +245,115 @@ class UtilidadService
           AND c.id_operacion IN (1, 2)
           {$where_ag}
           {$where_mon}
-        ORDER BY u.login_usu, c.id_agencia, sub_mon.id_moneda, c.fec_crea_cambio
         ";
 
         $params = [':ini1' => $desde, ':fin1' => $fin, ':ini2' => $desde, ':fin2' => $fin];
         if ($id_agencia) $params[':ag'] = $id_agencia;
         if ($id_moneda) $params[':mon'] = $id_moneda;
 
-        return RawConnection::select($sql, $params);
+        $cambios = RawConnection::select($sql, $params);
+
+        // Las remesas que se cobran en USD ingresan físicamente a la caja con
+        // conciliación ER. No se crean filas en cambio: se incorporan sólo al
+        // costeo FIFO como una adquisición identificable en el Kardex.
+        //
+        // Se excluye una coincidencia exacta con una compra USD sintética del
+        // flujo legacy (`compra_usd`) para no duplicar inventario histórico.
+        $where_rem_ag = $id_agencia ? 'AND r.id_agencia = :rag' : '';
+        $where_rem_mon = ($id_moneda && $id_moneda !== 1) ? 'AND 1 = 0' : ''; // por ahora sólo USD (id 1)
+        $remesasSql = "
+        SELECT
+            u.login_usu AS cajero,
+            CONCAT(t.nom_trab, ' ', t.ape_pat_trab, ' ', t.ape_mat_trab) AS nombre,
+            a.descripcion AS agencia,
+            r.id_agencia,
+            1 AS id_moneda,
+            'USD' AS moneda,
+            3 AS op,
+            r.monto AS monto_me,
+            ROUND(r.monto * COALESCE(
+                (
+                    SELECT ct.valor
+                    FROM cotizacion ct
+                    WHERE ct.id_agencia = r.id_agencia
+                      AND ct.id_moneda = 1
+                      AND ct.id_operacion = 1
+                      AND ct.fec_crea_cotizacion <= r.fec_crea_remesa
+                    ORDER BY ct.fec_crea_cotizacion DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT cb.valor_base
+                    FROM cotizacion_base cb
+                    WHERE cb.id_agencia = r.id_agencia
+                      AND cb.id_moneda = 1
+                      AND cb.id_operacion = 1
+                      AND cb.fecha_creacion <= r.fec_crea_remesa
+                    ORDER BY cb.fecha_creacion DESC
+                    LIMIT 1
+                )
+            ), 2) AS bob,
+            r.fec_crea_remesa AS fecha,
+            COALESCE(
+                (
+                    SELECT ct.valor
+                    FROM cotizacion ct
+                    WHERE ct.id_agencia = r.id_agencia
+                      AND ct.id_moneda = 1
+                      AND ct.id_operacion = 1
+                      AND ct.fec_crea_cotizacion <= r.fec_crea_remesa
+                    ORDER BY ct.fec_crea_cotizacion DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT cb.valor_base
+                    FROM cotizacion_base cb
+                    WHERE cb.id_agencia = r.id_agencia
+                      AND cb.id_moneda = 1
+                      AND cb.id_operacion = 1
+                      AND cb.fecha_creacion <= r.fec_crea_remesa
+                    ORDER BY cb.fecha_creacion DESC
+                    LIMIT 1
+                )
+            ) AS tc_lote,
+            'remesa' AS origen,
+            CAST(r.codigo AS CHAR) AS referencia
+        FROM remesa r
+        JOIN usuario u ON u.cod_usuario = r.cod_usuario
+        JOIN trabajador t ON t.cod_trab = u.cod_trab
+        JOIN agencia a ON a.id_agencia = r.id_agencia
+        WHERE r.fec_crea_remesa >= :rini
+          AND r.fec_crea_remesa < DATE_ADD(:rfin, INTERVAL 1 DAY)
+          AND r.mon_rec = 1
+          AND r.monto > 0
+          AND r.estado IN (0, 1)
+          {$where_rem_ag}
+          {$where_rem_mon}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM cambio cx
+              WHERE cx.id_operacion = 1
+                AND cx.id_agencia = r.id_agencia
+                AND cx.cod_usuario = r.cod_usuario
+                AND cx.mon_rec = 1
+                AND cx.mon_ent = 2
+                AND cx.monto = r.monto
+                AND cx.fec_crea_cambio = r.fec_crea_remesa
+          )
+        HAVING tc_lote > 0
+        ";
+
+        $remParams = [':rini' => $desde, ':rfin' => $fin];
+        if ($id_agencia) $remParams[':rag'] = $id_agencia;
+        $remesas = RawConnection::select($remesasSql, $remParams);
+
+        $operaciones = array_merge($cambios, $remesas);
+        usort($operaciones, function ($a, $b) {
+            $ka = $a['id_agencia'] . '|' . $a['id_moneda'] . '|' . $a['fecha'];
+            $kb = $b['id_agencia'] . '|' . $b['id_moneda'] . '|' . $b['fecha'];
+            return strcmp($ka, $kb);
+        });
+        return $operaciones;
     }
 
     /**
@@ -393,7 +503,12 @@ class UtilidadService
                 $me = (float) $op['monto_me'];
                 $bob = (float) $op['bob'];
                 $en_periodo = ($op['fecha'] >= $ini_reporte);
-                $tc_op = $me > 0 ? $bob / $me : 0;
+                // En la adquisición por remesa el costo es el TC de compra
+                // histórico, no una conversión registrada en cambio.
+                $tc_op = ($op['tc_lote'] ?? null) !== null
+                    ? (float) $op['tc_lote']
+                    : ($me > 0 ? $bob / $me : 0);
+                $es_entrada = ((int) $op['op'] === 1 || (int) $op['op'] === 3);
 
                 if ($en_periodo && !$saldo_ini_emitido) {
                     $saldo_ini_emitido = true;
@@ -423,7 +538,7 @@ class UtilidadService
 
                 // Operaciones de otros cajeros: procesar la cola en silencio
                 if ($id_cajero && $op['cajero'] !== $id_cajero) {
-                    if ($op['op'] == 1) {
+                    if ($es_entrada) {
                         $lotes[] = ['me' => $me, 'tc' => $tc_op];
                     } else {
                         $me_pv = $me;
@@ -435,7 +550,7 @@ class UtilidadService
                     continue;
                 }
 
-                if ($op['op'] == 1) {
+                if ($es_entrada) {
                     $lotes[] = ['me' => $me, 'tc' => $tc_op];
                     $saldo_me = 0; $costo_bob = 0;
                     foreach ($lotes as $l) { $saldo_me += $l['me']; $costo_bob += $l['me'] * $l['tc']; }
@@ -449,7 +564,7 @@ class UtilidadService
                             'id_agencia' => $g['id_agencia'],
                             'moneda' => $g['moneda'],
                             'id_moneda' => $g['id_moneda'],
-                            'op' => 1,
+                            'op' => (int) $op['op'],
                             'me' => $me,
                             'tc' => $tc_op,
                             'bob' => $bob,
@@ -458,6 +573,8 @@ class UtilidadService
                             'saldo_me' => round($saldo_me, 2),
                             'costo_saldo_bob' => round($costo_bob, 2),
                             'n_lotes' => count($lotes),
+                            'origen' => $op['origen'] ?? 'cambio',
+                            'referencia' => $op['referencia'] ?? null,
                         ];
                     }
                 } else {
@@ -501,6 +618,8 @@ class UtilidadService
                             'saldo_me' => round($saldo_me, 2),
                             'costo_saldo_bob' => round($costo_bob, 2),
                             'n_lotes' => count($lotes),
+                            'origen' => $op['origen'] ?? 'cambio',
+                            'referencia' => $op['referencia'] ?? null,
                         ];
                     }
                 }
@@ -582,7 +701,7 @@ class UtilidadService
                 $grupos[$k]['n_compras']++;
                 $grupos[$k]['me_comprada'] += $m['me'];
                 $grupos[$k]['bob_compras'] += $m['bob'];
-            } else {
+            } elseif ($m['op'] == 2) {
                 $grupos[$k]['n_ventas']++;
                 $grupos[$k]['me_vendida'] += $m['me'];
                 $grupos[$k]['bob_ventas'] += $m['bob'];
@@ -661,7 +780,7 @@ class UtilidadService
             if ($m['op'] == 1) {
                 $dias[$d]['bob_compras'] += $m['bob'];
                 $dias[$d]['n_compras']++;
-            } else {
+            } elseif ($m['op'] == 2) {
                 $dias[$d]['bob_ventas'] += $m['bob'];
                 $dias[$d]['n_ventas']++;
                 $dias[$d]['utilidad'] += $m['utilidad'];
@@ -711,7 +830,7 @@ class UtilidadService
                 $cajeros[$k]['n_compras']++;
                 $cajeros[$k]['bob_compras'] += $m['bob'];
                 $cajeros[$k]['me_comprada'] += $m['me'];
-            } else {
+            } elseif ($m['op'] == 2) {
                 $cajeros[$k]['n_ventas']++;
                 $cajeros[$k]['bob_ventas'] += $m['bob'];
                 $cajeros[$k]['me_vendida'] += $m['me'];

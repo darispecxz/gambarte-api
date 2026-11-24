@@ -1105,8 +1105,11 @@ class CajeroRemesaService
             $gambarteBob = 0;
         }
 
+        // Si la comisión viene incluida se descuenta del envío; si se cobra
+        // aparte, el destinatario recibe el importe completo ingresado.
+        $montoEntregaBob = $incluirComision ? $montoNetoBob : $montoEnviadoBob;
         $tcParalelo = $this->getCotizacionParalelaLegacy($idAgencia, 1);
-        $equivalenteUsd = $montoNetoBob / $tcParalelo;
+        $equivalenteUsd = $montoEntregaBob / $tcParalelo;
 
         return [
             'porcentaje' => [
@@ -1139,7 +1142,7 @@ class CajeroRemesaService
             'monto_enviado_x' => $montoNetoBob,
             'is_preferencial' => false,
             'equivalente_usd' => $equivalenteUsd,
-            'total_clp' => $this->calcularTotalClpParaBob($montoNetoBob, $tcParalelo, $idDestino),
+            'total_clp' => $this->calcularTotalClpParaBob($montoEntregaBob, $tcParalelo, $idDestino),
             'tipo_cambio_clp' => $this->obtenerTcClpUsd($idDestino),
         ];
     }

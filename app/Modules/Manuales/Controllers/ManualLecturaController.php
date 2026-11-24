@@ -17,7 +17,7 @@ class ManualLecturaController extends ApiController
         'cuentas_bancarias', 'traspasos_bancarios', 'depositos_retiros', 'movimientos_bancarios',
         'cheques', 'conciliacion', 'egreso_directo', 'ingreso_directo', 'egreso_autorizado',
         'ingreso_autorizado', 'transaccion_bancaria', 'pago_remesa_efectivo',
-        'pago_remesa_deposito', 'reporte_pago_remesas',
+        'pago_remesa_deposito', 'reporte_pago_remesas', 'recargas_realizadas', 'recargas_pendientes',
     ];
     private ManualLecturaService $service;
 
