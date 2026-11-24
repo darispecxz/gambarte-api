@@ -39,6 +39,10 @@ class RecargasController extends ApiController
     {
         return $this->execute('GET', '/api/integracion/recargas.php/pendientes');
     }
+    public function realizadas(): JsonResponse
+    {
+        return $this->execute('GET', '/api/integracion/recargas.php/realizadas');
+    }
 
     public function modo(): JsonResponse
     {
@@ -58,6 +62,34 @@ class RecargasController extends ApiController
     public function lineas(): JsonResponse
     {
         return $this->execute('GET', '/api/integracion/recargas.php/lineas');
+    }
+
+    /**
+     * Primera fase: venta directa aislada para UAT. Producción queda bloqueada
+     * hasta que el servicio de Chile implemente este mismo contrato.
+     */
+    public function registrarYConfirmar(Request $request): JsonResponse
+    {
+        if (!$this->gateway->isSimulated()) {
+            return $this->error('El registro directo de recargas aún está disponible solo en UAT.', 403);
+        }
+
+        $data = $request->validate([
+            'request_id' => 'required|uuid',
+            'id_proveedor' => 'required|integer|in:1,2,3',
+            'celular' => ['required', 'string', 'regex:/^[0-9]{8,15}$/'],
+            'monto_bob' => 'required|numeric|gt:0|max:10000',
+            'id_linea' => 'required|integer|min:1',
+            'glosa' => 'nullable|string|max:240',
+            'comprobante' => 'required|file|max:2048|mimes:pdf,jpg,jpeg,png',
+        ]);
+        $file = $request->file('comprobante');
+        $data['comprobante'] = [
+            'nombre' => basename($file->getClientOriginalName()),
+            'mime' => $file->getMimeType(),
+            'contenido_base64' => base64_encode(file_get_contents($file->getRealPath())),
+        ];
+        return $this->execute('POST', '/api/integracion/recargas.php/registrar-y-confirmar', $data + $this->operator($request));
     }
 
     public function reservar(Request $request, int $id): JsonResponse

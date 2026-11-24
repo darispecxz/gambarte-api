@@ -47,8 +47,16 @@ class UatRecargasSimulator
                     return $r;
                 }, $pending);
             }
+            if ($method === 'GET' && $route === '/realizadas') {
+                return array_values(array_filter($state['recargas'], fn(array $r): bool => $r['estado'] === 1));
+            }
             if ($method === 'GET' && $route === '/lineas') {
                 return array_values($state['lineas']);
+            }
+            if ($method === 'POST' && $route === '/registrar-y-confirmar') {
+                $result = $this->registrarYConfirmar($state, $payload);
+                $cache->put(self::KEY, $state, self::TTL);
+                return $result;
             }
             if ($method !== 'POST' || !preg_match('~^/([0-9]+)/(reservar|confirmar|liberar)$~', $route, $match)) {
                 throw new UatSimulationException('Operación de simulación no reconocida');
@@ -131,6 +139,62 @@ class UatRecargasSimulator
         $recarga['reserva']['id_linea'] = $lineId;
         $recarga['reserva']['comprobante'] = $receipt;
         return ['estado' => 'CONFIRMADA', 'id_linea' => $lineId, 'comprobante' => ['sha256' => $receipt['sha256']]];
+    }
+
+    /** Simula el registro y pago atómico de una venta originada en Bolivia. */
+    private function registrarYConfirmar(array &$state, array $payload): array
+    {
+        $requestId = (string) ($payload['request_id'] ?? '');
+        $operator = (string) ($payload['operator'] ?? '');
+        $agency = (string) ($payload['agency'] ?? '');
+        if ($requestId === '' || $operator === '' || $agency === '') {
+            throw new UatSimulationException('Faltan datos de auditoría del operador');
+        }
+
+        foreach ($state['recargas'] as $recarga) {
+            if (($recarga['origen']['request_id'] ?? null) === $requestId) {
+                return [
+                    'estado' => 'CONFIRMADA',
+                    'id_recarga' => $recarga['id_recarga'],
+                    'id_detalle_recarga' => $recarga['id_detalle_recarga'],
+                    'id_linea' => $recarga['reserva']['id_linea'] ?? null,
+                    'idempotente' => true,
+                ];
+            }
+        }
+
+        $provider = (int) ($payload['id_proveedor'] ?? 0);
+        $lineId = (int) ($payload['id_linea'] ?? 0);
+        $amount = round((float) ($payload['monto_bob'] ?? 0), 2);
+        $phone = (string) ($payload['celular'] ?? '');
+        $line = $state['lineas'][$lineId] ?? null;
+        if (!in_array($provider, [1, 2, 3], true) || !preg_match('/^[0-9]{8,15}$/', $phone) || $amount <= 0) {
+            throw new UatSimulationException('Datos de recarga inválidos');
+        }
+        if (!$line || $line['id_proveedor'] !== $provider) {
+            throw new UatSimulationException('Línea incompatible con el proveedor');
+        }
+        if ((float) $line['saldo_bob'] < $amount) {
+            throw new UatSimulationException('Saldo insuficiente en la línea de prueba');
+        }
+
+        $detailId = max(array_keys($state['recargas'])) + 1;
+        $pos = max(array_column($state['recargas'], 'id_recarga')) + 1;
+        $receipt = $this->saveReceipt($detailId, $payload['comprobante'] ?? null);
+        $state['lineas'][$lineId]['saldo_bob'] = number_format((float) $line['saldo_bob'] - $amount, 2, '.', '');
+        $state['recargas'][$detailId] = [
+            'id_detalle_recarga' => $detailId,
+            'id_recarga' => $pos,
+            'codigo' => 'UAT-' . $pos,
+            'id_proveedor' => $provider,
+            'celular' => $phone,
+            'monto_bob' => number_format($amount, 2, '.', ''),
+            'fec_crea_recarga' => date('Y-m-d H:i:s'),
+            'estado' => 1,
+            'reserva' => ['estado' => 'CONFIRMADA', 'id_linea' => $lineId, 'comprobante' => $receipt],
+            'origen' => ['sistema' => 'GAMBARTE_POS_UAT', 'request_id' => $requestId, 'operator' => $operator, 'agency' => $agency],
+        ];
+        return ['estado' => 'CONFIRMADA', 'id_recarga' => $pos, 'id_detalle_recarga' => $detailId, 'id_linea' => $lineId, 'comprobante' => ['sha256' => $receipt['sha256']]];
     }
 
     private function saveReceipt(int $id, $input): array

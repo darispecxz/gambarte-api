@@ -5,9 +5,13 @@ use App\Modules\Cajero\Controllers\CajeroCambioController;
 use App\Modules\Cajero\Controllers\CajeroMovimientosController;
 use App\Modules\Cajero\Controllers\CajeroGiroController;
 use App\Modules\Cajero\Controllers\CajeroRemesaController;
+use App\Modules\Cajero\Controllers\PosCuentaController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('cajero')->middleware(['jwt', 'role:1,2,4,6'])->group(function () {
+    Route::get('/cuenta', [PosCuentaController::class, 'mostrar']);
+    Route::put('/cuenta', [PosCuentaController::class, 'guardar']);
+    Route::post('/cuenta/firma', [PosCuentaController::class, 'subirFirma']);
     // Lectura
     Route::get('/mis-cajas',        [CajeroController::class, 'misCajas']);
     Route::get('/denominaciones',   [CajeroController::class, 'denominaciones']);
@@ -17,6 +21,7 @@ Route::prefix('cajero')->middleware(['jwt', 'role:1,2,4,6'])->group(function () 
     Route::post('/apertura',        [CajeroController::class, 'apertura']);
     Route::post('/cierre',          [CajeroController::class, 'cierre']);
     Route::post('/cierre-con-apertura', [CajeroController::class, 'cierreConApertura']);
+    Route::get('/reporte-caja/{idCaja}/{tipo}', [CajeroController::class, 'reporteCaja'])->where('idCaja', '[0-9]+')->where('tipo', 'apertura|cierre');
 
     // Facturación / SIAT
     Route::get('/estado-siat',      [CajeroCambioController::class, 'estadoSiat']);
