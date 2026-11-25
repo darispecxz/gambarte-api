@@ -11,6 +11,12 @@ class ModuleServiceProvider extends ServiceProvider
 {
     public function register()
     {
+        $this->app->bind(\App\Modules\Notificaciones\WhatsApp\WhatsAppProvider::class, function () {
+            if (config('whatsapp.provider') !== 'evolution') {
+                throw new \RuntimeException('Proveedor WhatsApp no compatible.');
+            }
+            return new \App\Modules\Notificaciones\WhatsApp\EvolutionProvider();
+        });
         $this->app->bind(DiscrepancyRepositoryInterface::class, DiscrepancyRepository::class);
     }
 
